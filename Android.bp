@@ -2,17 +2,11 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-genrule {
-    name: "statslog-Nfc-java-gen",
-    tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --java $(out) --module nfc --javaPackage com.android.nfc"
-        + " --javaClass NfcStatsLog",
-    out: ["com/android/nfc/NfcStatsLog.java"],
-}
-
 // NCI Configuration
+//ALLOW_MISSING_DEPENDENCIES = ["true"]
 android_app {
-    name: "NfcNci",
+    name: "NQNfcNci",
+    system_ext_specific: true,
     srcs: [
         "src/**/*.java",
         "nci/**/*.java",
@@ -20,27 +14,14 @@ android_app {
     ],
     platform_apis: true,
     certificate: "platform",
-    jni_libs: ["libnfc_nci_jni"],
+    jni_libs: ["libsn100nfc_nci_jni"],
+    libs: ["com.nxp.nfc.nq"],
+    uses_libs: ["com.nxp.nfc.nq"],
     static_libs: [
-        "android.se.omapi-V1-java",
-        "androidx.annotation_annotation",
         "androidx.appcompat_appcompat",
-        "com.google.android.material_material",
-        "PlatformProperties",
-    ],
+        "vendor.nxp.hardware.nfc-V2.0-java",
+        ],
     optimize: {
-        proguard_flags_files: ["proguard.flags"],
+        enabled: false,
     },
-    jarjar_rules: "jarjar-rules.txt",
-}
-
-filegroup {
-    name: "nfc-sources",
-    srcs: [
-        "src/**/*.java",
-        ":statslog-Nfc-java-gen",
-    ],
-    visibility: [
-        "//packages/apps/Nfc/tests/unit",
-    ],
 }

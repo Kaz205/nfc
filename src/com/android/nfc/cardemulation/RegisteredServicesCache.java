@@ -1,4 +1,7 @@
 /*
+ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+ * Not a Contribution.
+ *
  * Copyright (C) 2013 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +16,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+/******************************************************************************
+*
+*  The original Work has been changed by NXP.
+*
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
+*
+*  http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
+*
+*  Copyright 2018-2021 NXP
+*
+******************************************************************************/
 package com.android.nfc.cardemulation;
 
 import android.app.ActivityManager;
@@ -24,24 +45,28 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.content.pm.PackageManager.ResolveInfoFlags;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.nfc.cardemulation.AidGroup;
 import android.nfc.cardemulation.ApduServiceInfo;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.nfc.cardemulation.OffHostApduService;
+import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
-import android.sysprop.NfcProperties;
 import android.util.AtomicFile;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.Xml;
 import android.util.proto.ProtoOutputStream;
+import com.nxp.nfc.NfcConstants;
 
 import com.android.internal.annotations.GuardedBy;
+import com.android.internal.util.FastXmlSerializer;
+
+import com.google.android.collect.Maps;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -60,6 +85,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import com.android.nfc.NfcService;
 
 /**
  * This class is inspired by android.content.pm.RegisteredServicesCache
@@ -71,7 +97,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public class RegisteredServicesCache {
     static final String XML_INDENT_OUTPUT_FEATURE = "http://xmlpull.org/v1/doc/features.html#indent-output";
     static final String TAG = "RegisteredServicesCache";
-    static final boolean DEBUG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DEBUG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
+    static final String SERVICE_STATE_FILE_VERSION="1.0";
 
     final Context mContext;
     final AtomicReference<BroadcastReceiver> mReceiver;
@@ -87,18 +114,16 @@ public class RegisteredServicesCache {
     final SparseArray<UserServices> mUserServices = new SparseArray<UserServices>();
     final Callback mCallback;
     final AtomicFile mDynamicSettingsFile;
+    final AtomicFile mServiceStateFile;
+    HashMap<String, HashMap<ComponentName, Integer>> installedServices = new HashMap<>();
 
     public interface Callback {
-        /**
-         * ServicesUpdated for specific userId.
-         */
-        void onServicesUpdated(int userId, List<ApduServiceInfo> services,
-                boolean validateInstalled);
+        void onServicesUpdated(int userId, final List<ApduServiceInfo> services);
     };
 
     static class DynamicSettings {
         public final int uid;
-        public final HashMap<String, AidGroup> aidGroups = new HashMap<>();
+        public final HashMap<String, AidGroup> aidGroups = Maps.newHashMap();
         public String offHostSE;
 
         DynamicSettings(int uid) {
@@ -111,9 +136,9 @@ public class RegisteredServicesCache {
          * All services that have registered
          */
         final HashMap<ComponentName, ApduServiceInfo> services =
-                new HashMap<>(); // Re-built at run-time
+                Maps.newHashMap(); // Re-built at run-time
         final HashMap<ComponentName, DynamicSettings> dynamicSettings =
-                new HashMap<>(); // In memory cache of dynamic settings
+                Maps.newHashMap(); // In memory cache of dynamic settings
     };
 
     private UserServices findOrCreateUserLocked(int userId) {
@@ -146,22 +171,20 @@ public class RegisteredServicesCache {
                 String action = intent.getAction();
                 if (DEBUG) Log.d(TAG, "Intent action: " + action);
                 if (uid != -1) {
-                    boolean replaced = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false) &&
-                            (Intent.ACTION_PACKAGE_ADDED.equals(action) ||
-                             Intent.ACTION_PACKAGE_REMOVED.equals(action));
-                    if (!replaced) {
-                        int currentUser = ActivityManager.getCurrentUser();
-                        if (currentUser == getProfileParentId(UserHandle.
-                                getUserHandleForUid(uid).getIdentifier())) {
-                            if (Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
-                                invalidateCache(UserHandle.
-                                        getUserHandleForUid(uid).getIdentifier(), true);
-                            } else {
-                                invalidateCache(UserHandle.
-                                        getUserHandleForUid(uid).getIdentifier(), false);
-                            }
+                    int currentUser = ActivityManager.getCurrentUser();
+                    if (currentUser == getProfileParentId(UserHandle.getUserId(uid))) {
+                        if(Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
+                            Uri uri = intent.getData();
+                            String pkg = uri != null ? uri.getSchemeSpecificPart() : null;
+                        }
+                        boolean replaced = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false) &&
+                                (Intent.ACTION_PACKAGE_ADDED.equals(action) ||
+                                 Intent.ACTION_PACKAGE_REMOVED.equals(action));
+                        if (!replaced) {
+                        invalidateCache(UserHandle.getUserId(uid));
                         } else {
                             // Cache will automatically be updated on user switch
+                            if (DEBUG) Log.d(TAG, " Not removing service here " + replaced);
                         }
                     } else {
                         if (DEBUG) Log.d(TAG, "Ignoring package intent due to package being replaced.");
@@ -179,23 +202,24 @@ public class RegisteredServicesCache {
         intentFilter.addAction(Intent.ACTION_PACKAGE_FIRST_LAUNCH);
         intentFilter.addAction(Intent.ACTION_PACKAGE_RESTARTED);
         intentFilter.addDataScheme("package");
-        mContext.registerReceiverForAllUsers(mReceiver.get(), intentFilter, null, null);
+        mContext.registerReceiverAsUser(mReceiver.get(), UserHandle.ALL, intentFilter, null, null);
 
         // Register for events related to sdcard operations
         IntentFilter sdFilter = new IntentFilter();
         sdFilter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
         sdFilter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
-        mContext.registerReceiverForAllUsers(mReceiver.get(), sdFilter, null, null);
+        mContext.registerReceiverAsUser(mReceiver.get(), UserHandle.ALL, sdFilter, null, null);
 
         File dataDir = mContext.getFilesDir();
         mDynamicSettingsFile = new AtomicFile(new File(dataDir, "dynamic_aids.xml"));
+        mServiceStateFile = new AtomicFile(new File(dataDir, "service_state.xml"));
     }
 
     void initialize() {
         synchronized (mLock) {
             readDynamicSettingsLocked();
             for (UserHandle uh : mUserHandles) {
-                invalidateCache(uh.getIdentifier(), false);
+                invalidateCache(uh.getIdentifier());
             }
         }
     }
@@ -203,12 +227,14 @@ public class RegisteredServicesCache {
     public void onUserSwitched() {
         synchronized (mLock) {
             refreshUserProfilesLocked();
+            invalidateCache(ActivityManager.getCurrentUser());
         }
     }
 
     public void onManagedProfileChanged() {
         synchronized (mLock) {
             refreshUserProfilesLocked();
+            invalidateCache(ActivityManager.getCurrentUser());
         }
     }
 
@@ -275,7 +301,7 @@ public class RegisteredServicesCache {
         PackageManager pm;
         try {
             pm = mContext.createPackageContextAsUser("android", 0,
-                    UserHandle.of(userId)).getPackageManager();
+                    new UserHandle(userId)).getPackageManager();
         } catch (NameNotFoundException e) {
             Log.e(TAG, "Could not create user package context");
             return null;
@@ -285,11 +311,11 @@ public class RegisteredServicesCache {
 
         List<ResolveInfo> resolvedServices = new ArrayList<>(pm.queryIntentServicesAsUser(
                 new Intent(HostApduService.SERVICE_INTERFACE),
-                ResolveInfoFlags.of(PackageManager.GET_META_DATA), UserHandle.of(userId)));
+                PackageManager.GET_META_DATA, userId));
 
         List<ResolveInfo> resolvedOffHostServices = pm.queryIntentServicesAsUser(
                 new Intent(OffHostApduService.SERVICE_INTERFACE),
-                ResolveInfoFlags.of(PackageManager.GET_META_DATA), UserHandle.of(userId));
+                PackageManager.GET_META_DATA, userId);
         resolvedServices.addAll(resolvedOffHostServices);
 
         for (ResolveInfo resolvedService : resolvedServices) {
@@ -297,12 +323,6 @@ public class RegisteredServicesCache {
                 boolean onHost = !resolvedOffHostServices.contains(resolvedService);
                 ServiceInfo si = resolvedService.serviceInfo;
                 ComponentName componentName = new ComponentName(si.packageName, si.name);
-                // Check if the package exported the service in manifest
-                if (!si.exported) {
-                    Log.e(TAG, "Skipping application component " + componentName +
-                            ": it must configured as exported");
-                    continue;
-                }
                 // Check if the package holds the NFC permission
                 if (pm.checkPermission(android.Manifest.permission.NFC, si.packageName) !=
                         PackageManager.PERMISSION_GRANTED) {
@@ -332,10 +352,7 @@ public class RegisteredServicesCache {
         return validServices;
     }
 
-    /**
-     * invalidateCache for specific userId.
-     */
-    public void invalidateCache(int userId, boolean validateInstalled) {
+    public void invalidateCache(int userId) {
         final ArrayList<ApduServiceInfo> validServices = getInstalledServices(userId);
         if (validServices == null) {
             return;
@@ -389,8 +406,7 @@ public class RegisteredServicesCache {
                 writeDynamicSettingsLocked();
             }
         }
-        mCallback.onServicesUpdated(userId, Collections.unmodifiableList(validServices),
-                validateInstalled);
+        mCallback.onServicesUpdated(userId, Collections.unmodifiableList(validServices));
         dump(validServices);
     }
 
@@ -449,8 +465,7 @@ public class RegisteredServicesCache {
                             // See if we have a valid service
                             if (currentComponent != null && currentUid >= 0 &&
                                     (currentGroups.size() > 0 || currentOffHostSE != null)) {
-                                final int userId = UserHandle.
-                                        getUserHandleForUid(currentUid).getIdentifier();
+                                final int userId = UserHandle.getUserId(currentUid);
                                 DynamicSettings dynSettings = new DynamicSettings(currentUid);
                                 for (AidGroup group : currentGroups) {
                                     dynSettings.aidGroups.put(group.getCategory(), group);
@@ -486,7 +501,7 @@ public class RegisteredServicesCache {
         FileOutputStream fos = null;
         try {
             fos = mDynamicSettingsFile.startWrite();
-            XmlSerializer out = Xml.newSerializer();
+            XmlSerializer out = new FastXmlSerializer();
             out.setOutput(fos, "utf-8");
             out.startDocument(null, true);
             out.setFeature(XML_INDENT_OUTPUT_FEATURE, true);
@@ -559,7 +574,7 @@ public class RegisteredServicesCache {
             newServices = new ArrayList<ApduServiceInfo>(services.services.values());
         }
         // Make callback without the lock held
-        mCallback.onServicesUpdated(userId, newServices, true);
+        mCallback.onServicesUpdated(userId, newServices);
         return true;
     }
 
@@ -585,22 +600,23 @@ public class RegisteredServicesCache {
                 Log.e(TAG, "OffHostSE is not set");
                 return false;
             }
-
+            serviceInfo.unsetOffHostSecureElement();
             DynamicSettings dynSettings = services.dynamicSettings.get(componentName);
-            String offHostSE = dynSettings.offHostSE;
-            dynSettings.offHostSE = null;
-            boolean success = writeDynamicSettingsLocked();
-            if (!success) {
+            if (dynSettings != null) {
+              String offHostSE = dynSettings.offHostSE;
+              dynSettings.offHostSE = serviceInfo.getOffHostSecureElement();
+              boolean success = writeDynamicSettingsLocked();
+              if (!success) {
                 Log.e(TAG, "Failed to persist AID group.");
                 dynSettings.offHostSE = offHostSE;
                 return false;
+              }
             }
 
-            serviceInfo.unsetOffHostSecureElement();
             newServices = new ArrayList<ApduServiceInfo>(services.services.values());
         }
         // Make callback without the lock held
-        mCallback.onServicesUpdated(userId, newServices, true);
+        mCallback.onServicesUpdated(userId, newServices);
         return true;
     }
 
@@ -637,7 +653,7 @@ public class RegisteredServicesCache {
             DynamicSettings dynSettings = services.dynamicSettings.get(componentName);
             if (dynSettings == null) {
                 dynSettings = new DynamicSettings(uid);
-                dynSettings.offHostSE = null;
+                dynSettings.offHostSE = serviceInfo.getOffHostSecureElement();
                 services.dynamicSettings.put(componentName, dynSettings);
             }
             dynSettings.aidGroups.put(aidGroup.getCategory(), aidGroup);
@@ -653,7 +669,7 @@ public class RegisteredServicesCache {
         }
         if (success) {
             // Make callback without the lock held
-            mCallback.onServicesUpdated(userId, newServices, true);
+            mCallback.onServicesUpdated(userId, newServices);
         }
         return success;
     }
@@ -710,7 +726,7 @@ public class RegisteredServicesCache {
             }
         }
         if (success) {
-            mCallback.onServicesUpdated(userId, newServices, true);
+            mCallback.onServicesUpdated(userId, newServices);
         }
         return success;
     }

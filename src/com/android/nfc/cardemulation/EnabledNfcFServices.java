@@ -13,17 +13,35 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+ /******************************************************************************
+*
+*  The original Work has been changed by NXP.
+*
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
+*
+*  http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
+*
+*  Copyright 2019-2021 NXP
+*
+******************************************************************************/
 package com.android.nfc.cardemulation;
 
-import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.nfc.cardemulation.NfcFServiceInfo;
-import android.nfc.cardemulation.Utils;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemProperties;
 import android.os.UserHandle;
-import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
 
@@ -32,15 +50,16 @@ import com.android.nfc.ForegroundUtils;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 
+
 public class EnabledNfcFServices implements com.android.nfc.ForegroundUtils.Callback {
     static final String TAG = "EnabledNfcFCardEmulationServices";
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     final Context mContext;
     final RegisteredNfcFServicesCache mNfcFServiceCache;
     final RegisteredT3tIdentifiersCache mT3tIdentifiersCache;
     final Callback mCallback;
-    final ForegroundUtils mForegroundUtils;
+    final ForegroundUtils mForegroundUtils = ForegroundUtils.getInstance();
     final Handler mHandler = new Handler(Looper.getMainLooper());
 
     final Object mLock = new Object();
@@ -64,8 +83,6 @@ public class EnabledNfcFServices implements com.android.nfc.ForegroundUtils.Call
             RegisteredT3tIdentifiersCache t3tIdentifiersCache, Callback callback) {
         if (DBG) Log.d(TAG, "EnabledNfcFServices");
         mContext = context;
-        mForegroundUtils = ForegroundUtils.getInstance(
-                context.getSystemService(ActivityManager.class));
         mNfcFServiceCache = nfcFServiceCache;
         mT3tIdentifiersCache = t3tIdentifiersCache;
         mCallback = callback;
@@ -241,12 +258,10 @@ public class EnabledNfcFServices implements com.android.nfc.ForegroundUtils.Call
     void dumpDebug(ProtoOutputStream proto) {
         synchronized (mLock) {
             if (mForegroundComponent != null) {
-                Utils.dumpDebugComponentName(
-                        mForegroundComponent, proto, EnabledNfcFServicesProto.FOREGROUND_COMPONENT);
+                 mForegroundComponent.dumpDebug(proto, EnabledNfcFServicesProto.FOREGROUND_COMPONENT);
             }
             if (mForegroundRequested != null) {
-                Utils.dumpDebugComponentName(
-                        mForegroundRequested, proto, EnabledNfcFServicesProto.FOREGROUND_REQUESTED);
+                 mForegroundRequested.dumpDebug(proto, EnabledNfcFServicesProto.FOREGROUND_REQUESTED);
             }
             proto.write(EnabledNfcFServicesProto.ACTIVATED, mActivated);
             proto.write(EnabledNfcFServicesProto.COMPUTE_FG_REQUESTED, mComputeFgRequested);

@@ -13,7 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+/******************************************************************************
+*
+*  The original Work has been changed by NXP.
+*
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
+*
+*  http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
+*
+*  Copyright 2018-2021 NXP
+*
+******************************************************************************/
 package com.android.nfc;
 
 import android.annotation.Nullable;
@@ -32,6 +50,22 @@ public interface DeviceHost {
         public void onHostCardEmulationActivated(int technology);
         public void onHostCardEmulationData(int technology, byte[] data);
         public void onHostCardEmulationDeactivated(int technology);
+        /**
+         * Notifies that the SE has been activated in listen mode
+         */
+        public void onSeListenActivated();
+
+        /**
+         * Notifies that the SE has been deactivated
+         */
+        public void onSeListenDeactivated();
+
+        /**
+         * Notifies SRD event
+         */
+        public void onNotifySrdEvt(int event);
+
+        public void onNotifyEfdmEvt(int efdmEvt);
 
         /**
          * Notifies P2P Device detected, to activate LLCP link
@@ -49,11 +83,27 @@ public interface DeviceHost {
 
         public void onRemoteFieldDeactivated();
 
-        public void onNfcTransactionEvent(byte[] aid, byte[] data, String seName);
-
         public void onEeUpdated();
 
         public void onHwErrorReported();
+        /**
+         * Notifies SWP Reader Events.
+         */
+        public void onScrNotifyEvents(int event);
+
+        public void onNfcTransactionEvent(byte[] aid, byte[] data, String seName);
+
+        public void onLxDebugConfigData(int len, byte[] data);
+
+        public void notifyTagAbort();
+
+        /**
+         * Notifies core generic error notification
+         */
+        void notifyCoreGenericError(int errorCode);
+
+        /** Notifies TZ Secure Zone Notification **/
+        public void onTZNfcSecureZoneReported();
     }
 
     public interface TagEndpoint {
@@ -84,15 +134,6 @@ public interface DeviceHost {
         boolean makeReadOnly();
 
         int getConnectedTechnology();
-
-        /**
-         * Find Ndef only
-         * As per NFC forum test specification ndef write test expects only
-         * ndef detection followed by ndef write. System property
-         * nfc.dta.skipNdefRead added to skip default ndef read before tag
-         * dispatch. This system property is valid only in reader mode.
-         */
-        void findNdef();
     }
 
     public interface TagDisconnectedCallback {
@@ -198,13 +239,38 @@ public interface DeviceHost {
 
     public void disableDiscovery();
 
+    public int[] doGetActiveSecureElementList();
     public boolean sendRawFrame(byte[] data);
 
     public boolean routeAid(byte[] aid, int route, int aidInfo, int power);
 
     public boolean unrouteAid(byte[] aid);
 
+    public boolean setRoutingEntry(int type, int value, int route, int power);
+
+    public boolean clearRoutingEntry(int type);
+
+    public int getDefaultAidRoute();
+
+    public int getDefaultDesfireRoute();
+
+    public int getT4TNfceePowerState();
+
+    public int getDefaultMifareCLTRoute();
+
+    public int getDefaultFelicaCLTRoute();
+
+    public int getDefaultAidPowerState();
+
+    public int getDefaultDesfirePowerState();
+
+    public int getDefaultMifareCLTPowerState();
+
+    public int getDefaultFelicaCLTPowerState();
+
     public boolean commitRouting();
+
+    public void setEmptyAidRoute(int defaultAidRoute);
 
     public void registerT3tIdentifier(byte[] t3tIdentifier);
 
@@ -259,6 +325,20 @@ public interface DeviceHost {
 
     public void doSetScreenState(int screen_state_mask);
 
+    public void doResonantFrequency(boolean isResonantFreq);
+
+    void stopPoll(int mode);
+
+    void startPoll();
+
+    int mposSetReaderMode(boolean on);
+
+    int configureSecureReaderMode(boolean on, String readerType);
+
+    boolean mposGetReaderMode();
+
+    public int doNfcSelfTest(int type);
+
     public int getNciVersion();
 
     public void enableDtaMode();
@@ -284,12 +364,36 @@ public interface DeviceHost {
     int getMaxRoutingTableSize();
 
     /**
-    * Start or stop RF polling
-    */
+     * Start or stop RF polling
+     */
     void startStopPolling(boolean enable);
 
+    /* NXP extension are here */
+    public void doChangeDiscoveryTech(int pollTech, int listenTech);
+    public boolean accessControlForCOSU (int mode);
+
+    public int getFWVersion();
+    boolean isNfccBusy();
+    int setTransitConfig(String configs);
+    public int getRemainingAidTableSize();
+    public int doselectUicc(int uiccSlot);
+    public int doGetSelectedUicc();
+    public int setPreferredSimSlot(int uiccSlot);
+    public int doSetFieldDetectMode(boolean mode);
+    public boolean isFieldDetectEnabled();
+    public int doStartRssiMode(int rssiNtfTimeIntervalInMillisec);
+    public int doStopRssiMode();
+    public boolean isRssiEnabled();
+    public int doWriteT4tData(byte[] fileId, byte[] data, int length);
+    public byte[] doReadT4tData(byte[] fileId);
+    public boolean doLockT4tData(boolean lock);
+    public boolean isLockedT4tData();
+    public boolean doClearNdefT4tData();
+    public int doEnableDebugNtf(byte fieldValue);
+    public int startExtendedFieldDetectMode(int detectionTimeout);
+    public int stopExtendedFieldDetectMode();
     /**
-    * Set NFCC power state by sending NFCEE_POWER_AND_LINK_CNTRL_CMD
-    */
-    void setNfceePowerAndLinkCtrl(boolean enable);
+     * Restarts RF Discovery
+     */
+    void restartRFDiscovery();
 }

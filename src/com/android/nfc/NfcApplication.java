@@ -19,12 +19,14 @@ package com.android.nfc;
 import android.app.ActivityManager;
 import android.app.ActivityManager.RunningAppProcessInfo;
 import android.app.Application;
-import android.content.pm.PackageManager;
 import android.os.Process;
 import android.os.UserHandle;
+import android.view.ThreadedRenderer;
+import android.content.pm.PackageManager;
 
 import java.util.Iterator;
 import java.util.List;
+import java.io.File;
 
 public class NfcApplication extends Application {
 
@@ -51,7 +53,7 @@ public class NfcApplication extends Application {
         // object in those cases, hence check the name of the process
         // to determine whether we're the main NFC service, or the
         // handover process
-        ActivityManager am = this.getSystemService(ActivityManager.class);
+        ActivityManager am = (ActivityManager)this.getSystemService(ACTIVITY_SERVICE);
         List processes = am.getRunningAppProcesses();
         Iterator i = processes.iterator();
         while (i.hasNext()) {
@@ -61,8 +63,13 @@ public class NfcApplication extends Application {
                 break;
             }
         }
-        if (UserHandle.myUserId() == 0 && isMainProcess) {
-            mNfcService = new NfcService(this);
+        // Enabling the NFC client service when device node is presence
+        File file = new File("/dev/nq-nci");
+        if (file.exists()) {
+            if (UserHandle.myUserId() == 0 && isMainProcess) {
+                mNfcService = new NfcService(this);
+                ThreadedRenderer.enableForegroundTrimming();
+           }
         }
     }
 }

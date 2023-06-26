@@ -13,7 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+/******************************************************************************
+*
+*  The original Work has been changed by NXP.
+*
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
+*
+*  http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
+*
+*  Copyright 2018-2021 NXP
+*
+******************************************************************************/
 package com.android.nfc.cardemulation;
 
 import android.app.ActivityManager;
@@ -21,15 +39,14 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.nfc.cardemulation.ApduServiceInfo;
 import android.nfc.cardemulation.CardEmulation;
-import android.nfc.cardemulation.Utils;
 import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
-import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
 
 import com.android.nfc.NfcService;
+import com.google.android.collect.Maps;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -43,11 +60,12 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.PriorityQueue;
 import java.util.TreeMap;
+import com.nxp.nfc.NfcConstants;
 
 public class RegisteredAidCache {
     static final String TAG = "RegisteredAidCache";
 
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     static final int AID_ROUTE_QUAL_SUBSET = 0x20;
     static final int AID_ROUTE_QUAL_PREFIX = 0x10;
@@ -64,7 +82,8 @@ public class RegisteredAidCache {
     static final int POWER_STATE_ALL_NCI_VERSION_1_0 = POWER_STATE_SWITCH_ON
                                                      | POWER_STATE_SWITCH_OFF
                                                      | POWER_STATE_BATTERY_OFF;
-
+    static final int SCREEN_STATE_INVALID = 0x00;
+    static final int SCREEN_STATE_DEFAULT_MASK = 0x16;
     final Map<Integer, List<ApduServiceInfo>> mUserApduServiceInfo =
             new HashMap<Integer, List<ApduServiceInfo>>();
     // mAidServices maps AIDs to services that have registered them.
@@ -125,7 +144,7 @@ public class RegisteredAidCache {
         ApduServiceInfo defaultService = null;
         String category = null;
         boolean mustRoute = true; // Whether this AID should be routed at all
-        ResolvedPrefixConflictAid prefixInfo = null;
+        ReslovedPrefixConflictAid prefixInfo = null;
         @Override
         public String toString() {
             return "AidResolveInfo{" +
@@ -155,7 +174,7 @@ public class RegisteredAidCache {
 
     public RegisteredAidCache(Context context) {
         mContext = context;
-        mRoutingManager = new AidRoutingManager();
+        mRoutingManager = NfcService.getInstance().getAidRoutingCache();
         mPreferredPaymentService = null;
         mUserIdPreferredPaymentService = -1;
         mPreferredForegroundService = null;
@@ -223,6 +242,10 @@ public class RegisteredAidCache {
             if (DBG) Log.d(TAG, "Resolved to: " + resolveInfo);
             return resolveInfo;
         }
+    }
+
+    public ComponentName getPreferredPaymentService(){
+        return mPreferredPaymentService;
     }
 
     public boolean supportsAidPrefixRegistration() {
@@ -380,8 +403,8 @@ public class RegisteredAidCache {
             resolveinfo = resolveAidConflictLocked(aidServices, true);
             //If the AID is subsetAID check for prefix in same service.
             if (isSubset(aidServices.get(0).aid)) {
-                resolveinfo.prefixInfo = findPrefixConflictForSubsetAid(aidServices.get(0).aid,
-                        List.of(resolveinfo.defaultService), true);
+                resolveinfo.prefixInfo = findPrefixConflictForSubsetAid(aidServices.get(0).aid ,
+                        new ArrayList<ApduServiceInfo>(){{add(resolveinfo.defaultService);}},true);
             }
              return resolveinfo;
         } else if (aidDefaultInfo.paymentDefault != null) {
@@ -399,8 +422,8 @@ public class RegisteredAidCache {
                 resolveinfo = resolveAidConflictLocked(aidServices, true);
                 //If the AID is subsetAID check for prefix in same service.
                 if (isSubset(aidServices.get(0).aid)) {
-                    resolveinfo.prefixInfo = findPrefixConflictForSubsetAid(aidServices.get(0).aid,
-                        List.of(resolveinfo.defaultService), true);
+                    resolveinfo.prefixInfo = findPrefixConflictForSubsetAid(aidServices.get(0).aid ,
+                        new ArrayList<ApduServiceInfo>(){{add(resolveinfo.defaultService);}},true);
                 }
                 return resolveinfo;
             }
@@ -418,13 +441,13 @@ public class RegisteredAidCache {
                 //If the AID is subsetAID check for conflicting prefix in all
                 //conflciting services and root services.
                 if (isSubset(aidServices.get(0).aid)) {
-                    ArrayList<ApduServiceInfo> apduServiceList = new ArrayList<ApduServiceInfo>();
+                    ArrayList <ApduServiceInfo> apduServiceList = new  ArrayList <ApduServiceInfo>();
                     for (ServiceAidInfo serviceInfo : conflictingServices)
                         apduServiceList.add(serviceInfo.service);
                     for (ServiceAidInfo serviceInfo : aidServices)
                         apduServiceList.add(serviceInfo.service);
-                    resolveinfo.prefixInfo = findPrefixConflictForSubsetAid(
-                            aidServices.get(0).aid, apduServiceList, false);
+                    resolveinfo.prefixInfo =
+                         findPrefixConflictForSubsetAid(aidServices.get(0).aid ,apduServiceList,false);
                 }
                 return resolveinfo;
             }
@@ -443,7 +466,7 @@ public class RegisteredAidCache {
                     .getSystemService(UserManager.class);
             uh = um.getProfileParent(UserHandle.of(userId));
         } catch (IllegalStateException e) {
-            Log.d(TAG, "Failed to query parent id for profileid:" + userId);
+            if (DBG) Log.d(TAG, "Failed to query parent id for profileid:" + userId);
         }
         return uh == null ? userId : uh.getIdentifier();
     }
@@ -468,11 +491,11 @@ public class RegisteredAidCache {
 
                 for (String aid : service.getAids()) {
                     if (!CardEmulation.isValidAid(aid)) {
-                        Log.e(TAG, "Aid " + aid + " is not valid.");
+                        if (DBG) Log.e(TAG, "Aid " + aid + " is not valid.");
                         continue;
                     }
                     if (aid.endsWith("*") && !supportsAidPrefixRegistration()) {
-                        Log.e(TAG, "Prefix AID " + aid
+                        if (DBG) Log.e(TAG, "Prefix AID " + aid
                                 + " ignored on device that doesn't support it.");
                         continue;
                     } else if (supportsAidPrefixRegistration() && prefixAids.size() > 0
@@ -482,7 +505,7 @@ public class RegisteredAidCache {
                         for (String prefixAid : prefixAids) {
                             String prefix = prefixAid.substring(0, prefixAid.length() - 1);
                             if (aid.startsWith(prefix)) {
-                                Log.e(TAG, "Ignoring exact AID " + aid + " because prefix AID "
+                                if (DBG) Log.e(TAG, "Ignoring exact AID " + aid + " because prefix AID "
                                         + prefixAid + " is already registered");
                                 foundPrefix = true;
                                 break;
@@ -492,7 +515,7 @@ public class RegisteredAidCache {
                             continue;
                         }
                     } else if (aid.endsWith("#") && !supportsAidSubsetRegistration()) {
-                        Log.e(TAG, "Subset AID " + aid
+                        if (DBG) Log.e(TAG, "Subset AID " + aid
                                 + " ignored on device that doesn't support it.");
                         continue;
                     } else if (supportsAidSubsetRegistration() && subSetAids.size() > 0
@@ -502,7 +525,7 @@ public class RegisteredAidCache {
                         for (String subsetAid : subSetAids) {
                             String plainSubset = subsetAid.substring(0, subsetAid.length() - 1);
                             if (plainSubset.startsWith(aid)) {
-                                Log.e(TAG, "Ignoring exact AID " + aid + " because subset AID "
+                                if (DBG) Log.e(TAG, "Ignoring exact AID " + aid + " because subset AID "
                                         + plainSubset + " is already registered");
                                 foundSubset = true;
                                 break;
@@ -538,14 +561,20 @@ public class RegisteredAidCache {
     }
 
     static boolean isPrefix(String aid) {
+        if (aid == null) {
+            return false;
+        }
         return aid.endsWith("*");
     }
 
     static boolean isSubset(String aid) {
+        if (aid == null) {
+            return false;
+        }
         return aid.endsWith("#");
     }
 
-    final class ResolvedPrefixConflictAid {
+    final class ReslovedPrefixConflictAid {
         String prefixAid = null;
         boolean matchingSubset = false;
     }
@@ -556,8 +585,8 @@ public class RegisteredAidCache {
         final HashSet<String> aids = new HashSet<String>();
     }
 
-    ResolvedPrefixConflictAid findPrefixConflictForSubsetAid(String subsetAid ,
-            List<ApduServiceInfo> prefixServices, boolean priorityRootAid){
+    ReslovedPrefixConflictAid findPrefixConflictForSubsetAid(String subsetAid ,
+            ArrayList<ApduServiceInfo> prefixServices, boolean priorityRootAid){
         ArrayList<String> prefixAids = new ArrayList<String>();
         String minPrefix = null;
         //This functions checks whether there is a prefix AID matching to subset AID
@@ -588,7 +617,7 @@ public class RegisteredAidCache {
         }
         if (prefixAids.size() > 0)
             minPrefix = Collections.min(prefixAids);
-        ResolvedPrefixConflictAid resolvedPrefix = new ResolvedPrefixConflictAid();
+        ReslovedPrefixConflictAid resolvedPrefix = new ReslovedPrefixConflictAid();
         resolvedPrefix.prefixAid = minPrefix;
         if ((minPrefix != null ) &&
                 plainSubsetAid.equalsIgnoreCase(minPrefix.substring(0, minPrefix.length() - 1)))
@@ -704,7 +733,7 @@ public class RegisteredAidCache {
                                      userId == mUserIdPreferredForegroundService)) {
                                 AidResolveInfo childResolveInfo = resolveAidConflictLocked(mAidServices.get(aid), false);
                                 aidCache.put(aid,childResolveInfo);
-                                Log.d(TAG, "AID " + aid+ " shared with prefix; " +
+                                if (DBG) Log.d(TAG, "AID " + aid+ " shared with prefix; " +
                                                 "adding subset .");
                              }
                         }
@@ -855,12 +884,18 @@ public class RegisteredAidCache {
             resolvedAids.clear();
         }
 
-        updateRoutingLocked(false);
+        if (NfcService.getInstance().mIsRouteForced) {
+            updateRoutingLocked(true);
+        } else {
+            updateRoutingLocked(false);
+        }
     }
 
     private int computeAidPowerState(boolean isOnHost, boolean requiresScreenOn,
                                      boolean requiresUnlock) {
         int power = POWER_STATE_ALL;
+        /*By default POWER_STATE_BATTERY_OFF is not supported for AIDs*/
+        power &= ~POWER_STATE_BATTERY_OFF;
         if (NfcService.getInstance().getNciVersion() < NfcService.getInstance().NCI_VERSION_2_0) {
             power = POWER_STATE_ALL_NCI_VERSION_1_0;
         }
@@ -890,7 +925,8 @@ public class RegisteredAidCache {
             if (DBG) Log.d(TAG, "Not updating routing table because NFC is off.");
             return;
         }
-        final HashMap<String, AidRoutingManager.AidEntry> routingEntries = new HashMap<>();
+        final HashMap<String, AidRoutingManager.AidEntry> routingEntries = Maps.newHashMap();
+        boolean isNxpExtnEnabled = NfcService.getInstance().isNfcExtnsPresent();
         // For each AID, find interested services
         for (Map.Entry<String, AidResolveInfo> aidEntry:
                 mAidCache.entrySet()) {
@@ -923,27 +959,18 @@ public class RegisteredAidCache {
                 boolean requiresScreenOn = resolveInfo.defaultService.requiresScreenOn();
                 aidType.power =
                         computeAidPowerState(aidType.isOnHost, requiresScreenOn, requiresUnlock);
-
                 routingEntries.put(aid, aidType);
             } else if (resolveInfo.services.size() == 1) {
                 // Only one service, but not the default, must route to host
                 // to ask the user to choose one.
-                if (resolveInfo.category.equals(
-                        CardEmulation.CATEGORY_PAYMENT)) {
-                    aidType.isOnHost = true;
-                } else {
-                    aidType.isOnHost = resolveInfo.services.get(0).isOnHost();
-                    if (!aidType.isOnHost) {
-                        aidType.offHostSE =
-                                resolveInfo.services.get(0).getOffHostSecureElement();
-                    }
-                }
+                aidType.isOnHost = true;
 
                 boolean requiresUnlock = resolveInfo.services.get(0).requiresUnlock();
                 boolean requiresScreenOn = resolveInfo.services.get(0).requiresScreenOn();
                 aidType.power =
-                        computeAidPowerState(aidType.isOnHost, requiresScreenOn, requiresUnlock);
-
+                    computeAidPowerState(aidType.isOnHost, requiresScreenOn, requiresUnlock);
+                if (DBG)
+                    Log.d(TAG, "AID match with single service." );
                 routingEntries.put(aid, aidType);
             } else if (resolveInfo.services.size() > 1) {
                 // Multiple services if all the services are routing to same
@@ -987,9 +1014,10 @@ public class RegisteredAidCache {
                 aidType.offHostSE = onHost ? null : offHostSE;
                 requiresUnlock = onHost ? false : requiresUnlock;
                 requiresScreenOn = onHost ? true : requiresScreenOn;
-
-                aidType.power = computeAidPowerState(onHost, requiresScreenOn, requiresUnlock);
-
+                aidType.power =
+                    computeAidPowerState(onHost, requiresScreenOn, requiresUnlock);
+                if (DBG)
+                    Log.d(TAG, "AID match with multiple service." );
                 routingEntries.put(aid, aidType);
             }
         }
@@ -1022,6 +1050,14 @@ public class RegisteredAidCache {
             mUserIdPreferredForegroundService = userId;
             generateAidCacheLocked();
         }
+    }
+
+    public void onRoutingTableChanged() {
+      if (DBG)
+        Log.d(TAG, "onRoutingTableChanged");
+      synchronized (mLock) {
+        generateAidCacheLocked();
+      }
     }
 
     public ComponentName getPreferredService() {
@@ -1105,8 +1141,7 @@ public class RegisteredAidCache {
             ComponentName defaultComponent = defaultServiceInfo != null ?
                     defaultServiceInfo.getComponent() : null;
             if (defaultComponent != null) {
-                Utils.dumpDebugComponentName(
-                        defaultComponent, proto,
+                defaultComponent.dumpDebug(proto,
                         RegisteredAidCacheProto.AidCacheEntry.DEFAULT_COMPONENT);
             }
             for (ApduServiceInfo serviceInfo : entry.getValue().services) {
@@ -1117,8 +1152,7 @@ public class RegisteredAidCache {
             proto.end(token);
         }
         if (mPreferredForegroundService != null) {
-            Utils.dumpDebugComponentName(
-                    mPreferredForegroundService, proto,
+            mPreferredForegroundService.dumpDebug(proto,
                     RegisteredAidCacheProto.PREFERRED_FOREGROUND_SERVICE);
         }
         if (mPreferredPaymentService != null) {

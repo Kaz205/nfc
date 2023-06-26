@@ -3,7 +3,7 @@ package {
 }
 
 android_test {
-    name: "NfcNciUnitTests",
+    name: "snNfcNciInstrumentationTests",
 
     certificate: "platform",
 
@@ -17,24 +17,12 @@ android_test {
         "androidx.test.core",
         "androidx.test.rules",
         "androidx.test.ext.junit",
-        "mockito-target-extended-minus-junit4",
+        "mockito-target",
         "truth-prebuilt",
-        "androidx.annotation_annotation",
-        "androidx.appcompat_appcompat",
-        "com.google.android.material_material",
-    ],
-
-    jni_libs: [
-        // Required for ExtendedMockito
-        "libdexmakerjvmtiagent",
-        "libstaticjvmtiagent",
     ],
 
     // Include all test java files.
-    srcs: [
-      "src/**/*.java",
-      ":nfc-sources",
-    ],
+    srcs: ["src/**/*.java"],
 
     platform_apis: true,
 

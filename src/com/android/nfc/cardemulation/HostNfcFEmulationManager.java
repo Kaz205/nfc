@@ -13,6 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/******************************************************************************
+*
+*  The original Work has been changed by NXP.
+*
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
+*
+*  http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
+*
+*  Copyright 2018-2021 NXP
+*
+******************************************************************************/
 
 package com.android.nfc.cardemulation;
 
@@ -22,14 +41,13 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.nfc.cardemulation.HostNfcFService;
 import android.nfc.cardemulation.NfcFServiceInfo;
-import android.nfc.cardemulation.Utils;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
-import android.sysprop.NfcProperties;
+import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
@@ -42,7 +60,7 @@ import java.io.PrintWriter;
 
 public class HostNfcFEmulationManager {
     static final String TAG = "HostNfcFEmulationManager";
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
 
     static final int STATE_IDLE = 0;
     static final int STATE_W4_SERVICE = 1;
@@ -152,15 +170,9 @@ public class HostNfcFEmulationManager {
                         mPendingPacket = data;
                         mState = STATE_W4_SERVICE;
                     }
-
-                    int uid = -1;
-                    if(resolvedService != null) {
-                        uid = resolvedService.getUid();
-                    }
                     NfcStatsLog.write(NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                             NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__HCE_PAYMENT,
-                            "HCEF",
-                            uid);
+                            "HCEF");
                     break;
                 case STATE_W4_SERVICE:
                     Log.d(TAG, "Unexpected packet in STATE_W4_SERVICE");
@@ -218,6 +230,9 @@ public class HostNfcFEmulationManager {
             sendDeactivateToActiveServiceLocked(HostNfcFService.DEACTIVATION_LINK_LOSS);
             mActiveService = service;
             mActiveServiceName = mServiceName;
+        }
+        if (mActiveService == null) {
+            return;
         }
         Message msg = Message.obtain(null, HostNfcFService.MSG_COMMAND_PACKET);
         Bundle dataBundle = new Bundle();
@@ -338,14 +353,17 @@ public class HostNfcFEmulationManager {
                     return;
                 }
                 byte[] data = dataBundle.getByteArray("data");
-                if (data == null) {
+                /* this piece of code is commented to allow the application to send an empty
+                   data packet */
+                /*if (data == null) {
+                    Log.e(TAG, "Data is null");
                     return;
                 }
                 if (data.length == 0) {
                     Log.e(TAG, "Invalid response packet");
                     return;
-                }
-                if (data.length != (data[0] & 0xff)) {
+                }*/
+                if (data != null && (data.length != (data[0] & 0xff))) {
                     Log.e(TAG, "Invalid response packet");
                     return;
                 }
@@ -414,8 +432,7 @@ public class HostNfcFEmulationManager {
      */
     void dumpDebug(ProtoOutputStream proto) {
         if (mServiceBound) {
-            Utils.dumpDebugComponentName(
-                    mServiceName, proto, HostNfcFEmulationManagerProto.SERVICE_NAME);
+            mServiceName.dumpDebug(proto, HostNfcFEmulationManagerProto.SERVICE_NAME);
         }
     }
 }
